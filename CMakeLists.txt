@@ -53,10 +53,23 @@ set(IMGUI_SOURCES
     ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
 )
 
-add_executable(audio_recorder 
-    src/main.cpp
-    ${IMGUI_SOURCES}
-)
+if(APPLE)
+    add_executable(audio_recorder MACOSX_BUNDLE
+        src/main.cpp
+        ${IMGUI_SOURCES}
+    )
+    set_target_properties(audio_recorder PROPERTIES
+        MACOSX_BUNDLE_GUI_IDENTIFIER "com.audiorecorder.app"
+        MACOSX_BUNDLE_BUNDLE_NAME "Audio Recorder"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+    )
+else()
+    add_executable(audio_recorder 
+        src/main.cpp
+        ${IMGUI_SOURCES}
+    )
+endif()
 
 target_link_libraries(audio_recorder PRIVATE
     ${PORTAUDIO_LIBRARIES}
@@ -78,3 +91,50 @@ target_link_directories(audio_recorder PRIVATE
     ${PORTAUDIO_LIBRARY_DIRS}
     ${SNDFILE_LIBRARY_DIRS}
 )
+
+# Installation configuration
+if(APPLE)
+    set(INSTALL_BIN_DIR "/Applications" CACHE PATH "Installation directory for executables")
+elseif(UNIX)
+    set(INSTALL_BIN_DIR "bin" CACHE PATH "Installation directory for executables")
+    set(INSTALL_LIB_DIR "lib" CACHE PATH "Installation directory for libraries")
+    set(INSTALL_DATA_DIR "share/${PROJECT_NAME}" CACHE PATH "Installation directory for data files")
+else()
+    set(INSTALL_BIN_DIR "." CACHE PATH "Installation directory for executables")
+    set(INSTALL_LIB_DIR "." CACHE PATH "Installation directory for libraries")
+    set(INSTALL_DATA_DIR "." CACHE PATH "Installation directory for data files")
+endif()
+
+# Install targets
+install(TARGETS audio_recorder
+    RUNTIME DESTINATION ${INSTALL_BIN_DIR}
+    BUNDLE DESTINATION ${INSTALL_BIN_DIR}
+)
+
+# CPack configuration
+set(CPACK_PACKAGE_NAME "AudioRecorder")
+set(CPACK_PACKAGE_VENDOR "Your Company")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Audio Recording Application")
+set(CPACK_PACKAGE_VERSION "1.0.0")
+set(CPACK_PACKAGE_VERSION_MAJOR "1")
+set(CPACK_PACKAGE_VERSION_MINOR "0")
+set(CPACK_PACKAGE_VERSION_PATCH "0")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+
+# Platform specific packaging
+if(APPLE)
+    set(CPACK_GENERATOR "DragNDrop")
+    set(CPACK_DMG_VOLUME_NAME "AudioRecorder")
+    set(CPACK_DMG_FORMAT "UDZO")
+elseif(WIN32)
+    set(CPACK_GENERATOR "NSIS")
+    set(CPACK_NSIS_PACKAGE_NAME "Audio Recorder")
+    set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
+    set(CPACK_NSIS_MODIFY_PATH ON)
+else()
+    set(CPACK_GENERATOR "DEB")
+    set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Your Name <your.email@example.com>")
+    set(CPACK_DEBIAN_PACKAGE_DEPENDS "portaudio19-dev, libsndfile1-dev")
+endif()
+
+include(CPack)
