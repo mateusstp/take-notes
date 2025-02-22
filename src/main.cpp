@@ -168,6 +168,31 @@ std::string formatDuration(float seconds) {
     return ss.str();
 }
 
+struct AudioDevice {
+    int index;
+    std::string name;
+    int maxInputChannels;
+    int maxOutputChannels;
+};
+
+std::vector<AudioDevice> getAudioDevices() {
+    std::vector<AudioDevice> devices;
+    int numDevices = Pa_GetDeviceCount();
+    
+    for (int i = 0; i < numDevices; i++) {
+        const PaDeviceInfo* deviceInfo = Pa_GetDeviceInfo(i);
+        if (deviceInfo->maxInputChannels > 0) {  // Only add devices with input capability
+            AudioDevice device;
+            device.index = i;
+            device.name = deviceInfo->name;
+            device.maxInputChannels = deviceInfo->maxInputChannels;
+            device.maxOutputChannels = deviceInfo->maxOutputChannels;
+            devices.push_back(device);
+        }
+    }
+    return devices;
+}
+
 int main() {
     // Initialize GLFW and OpenGL
     if (!glfwInit()) {
@@ -183,7 +208,7 @@ int main() {
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);            // Required on Mac
 
     // Create window with graphics context
-    GLFWwindow* window = glfwCreateWindow(400, 200, "Audio Recorder", nullptr, nullptr);
+    GLFWwindow* window = glfwCreateWindow(800, 600, "Audio Recorder", nullptr, nullptr);
     if (!window) {
         std::cerr << "Failed to create GLFW window\n";
         glfwTerminate();
@@ -207,6 +232,16 @@ int main() {
     bool isRecording = false;
     std::chrono::steady_clock::time_point startTime;
     float recordingDuration = 0.0f;
+
+    // Get available audio devices
+    std::vector<AudioDevice> audioDevices = getAudioDevices();
+    int currentDevice = 0;  // Default device
+
+    // File name input buffer
+    char filenameBuffer[256] = "recording.wav";
+    
+    // Status message
+    std::string statusMsg;
 
     // Main loop
     while (!glfwWindowShouldClose(window)) {
@@ -236,13 +271,53 @@ int main() {
         // Center the content
         float windowWidth = ImGui::GetWindowSize().x;
         float windowHeight = ImGui::GetWindowSize().y;
+        float padding = 20.0f;
+        
+        // Device selection combo box
+        ImGui::SetCursorPosX(padding);
+        ImGui::SetCursorPosY(windowHeight * 0.2f);
+        if (ImGui::BeginCombo("Input Device", audioDevices[currentDevice].name.c_str())) {
+            for (int i = 0; i < audioDevices.size(); i++) {
+                bool isSelected = (currentDevice == i);
+                if (ImGui::Selectable(audioDevices[i].name.c_str(), isSelected)) {
+                    if (!isRecording) {  // Only allow changing device when not recording
+                        currentDevice = i;
+                    }
+                }
+                if (isSelected) {
+                    ImGui::SetItemDefaultFocus();
+                }
+            }
+            ImGui::EndCombo();
+        }
+
+        // Filename input
+        ImGui::SetCursorPosX(padding);
+        ImGui::SetCursorPosY(windowHeight * 0.3f);
+        ImGui::PushItemWidth(windowWidth - 2 * padding);
+        if (ImGui::InputText("Filename", filenameBuffer, sizeof(filenameBuffer))) {
+            // Add .wav extension if not present
+            std::string filename(filenameBuffer);
+            if (filename.substr(filename.length() - 4) != ".wav") {
+                filename += ".wav";
+                strncpy(filenameBuffer, filename.c_str(), sizeof(filenameBuffer));
+            }
+        }
+        ImGui::PopItemWidth();
         
         // Recording duration display
         std::string durationText = "Duration: " + formatDuration(recordingDuration);
         float textWidth = ImGui::CalcTextSize(durationText.c_str()).x;
         ImGui::SetCursorPosX((windowWidth - textWidth) * 0.5f);
-        ImGui::SetCursorPosY(windowHeight * 0.3f);
+        ImGui::SetCursorPosY(windowHeight * 0.4f);
         ImGui::Text("%s", durationText.c_str());
+
+        // Status message (if any)
+        if (!statusMsg.empty()) {
+            ImGui::SetCursorPosX(padding);
+            ImGui::SetCursorPosY(windowHeight * 0.6f);
+            ImGui::TextWrapped("%s", statusMsg.c_str());
+        }
 
         // Record/Stop button
         float buttonWidth = 120.0f;
@@ -263,7 +338,11 @@ int main() {
             if (ImGui::Button("Stop", ImVec2(buttonWidth, buttonHeight))) {
                 recorder.stopRecording();
                 isRecording = false;
-                recorder.saveToFile("recording.wav");
+                if (recorder.saveToFile(filenameBuffer)) {
+                    statusMsg = "Recording saved successfully to " + std::string(filenameBuffer);
+                } else {
+                    statusMsg = "Error saving recording to " + std::string(filenameBuffer);
+                }
             }
             ImGui::PopStyleColor();
         }
