@@ -34,3 +34,4 @@
 build/
 build_macos/
 build_windows/
+build_linux/
