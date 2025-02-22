@@ -7,6 +7,13 @@
 #include <atomic>
 #include <algorithm>
 #include <string>
+#include <imgui.h>
+#include <imgui_impl_glfw.h>
+#include <imgui_impl_opengl3.h>
+#include <GLFW/glfw3.h>
+#include <chrono>
+#include <iomanip>
+#include <sstream>
 
 class AudioRecorder {
 private:
@@ -151,31 +158,137 @@ public:
     }
 };
 
+// Helper function to format duration
+std::string formatDuration(float seconds) {
+    int mins = static_cast<int>(seconds) / 60;
+    int secs = static_cast<int>(seconds) % 60;
+    std::stringstream ss;
+    ss << std::setfill('0') << std::setw(2) << mins << ":" 
+       << std::setfill('0') << std::setw(2) << secs;
+    return ss.str();
+}
+
 int main() {
+    // Initialize GLFW and OpenGL
+    if (!glfwInit()) {
+        std::cerr << "Failed to initialize GLFW\n";
+        return -1;
+    }
+
+    // GL 3.2 + GLSL 150 for macOS
+    const char* glsl_version = "#version 150";
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);  // 3.2+ only
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);            // Required on Mac
+
+    // Create window with graphics context
+    GLFWwindow* window = glfwCreateWindow(400, 200, "Audio Recorder", nullptr, nullptr);
+    if (!window) {
+        std::cerr << "Failed to create GLFW window\n";
+        glfwTerminate();
+        return -1;
+    }
+    glfwMakeContextCurrent(window);
+    glfwSwapInterval(1); // Enable vsync
+
+    // Initialize Dear ImGui
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    ImGui::StyleColorsDark();
+
+    // Setup Platform/Renderer backends
+    ImGui_ImplGlfw_InitForOpenGL(window, true);
+    ImGui_ImplOpenGL3_Init(glsl_version);
+
+    // Initialize audio recorder
     AudioRecorder recorder;
-    std::cout << "Audio Recorder (Input + Output)\n";
-    std::cout << "Available audio devices:\n";
-    recorder.listAudioDevices();
-    std::cout << "\nPress Enter to start recording...\n";
-    std::cin.get();
+    bool isRecording = false;
+    std::chrono::steady_clock::time_point startTime;
+    float recordingDuration = 0.0f;
 
-    if (!recorder.startRecording()) {
-        std::cerr << "Failed to start recording\n";
-        return 1;
+    // Main loop
+    while (!glfwWindowShouldClose(window)) {
+        glfwPollEvents();
+
+        // Start the Dear ImGui frame
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+
+        // Create a window that takes up the entire GLFW window
+        ImGui::SetNextWindowPos(ImVec2(0, 0));
+        ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
+        ImGui::Begin("Audio Recorder", nullptr, 
+            ImGuiWindowFlags_NoTitleBar | 
+            ImGuiWindowFlags_NoResize | 
+            ImGuiWindowFlags_NoMove | 
+            ImGuiWindowFlags_NoCollapse);
+
+        // Update recording duration
+        if (isRecording) {
+            auto now = std::chrono::steady_clock::now();
+            recordingDuration = std::chrono::duration_cast<std::chrono::milliseconds>
+                (now - startTime).count() / 1000.0f;
+        }
+
+        // Center the content
+        float windowWidth = ImGui::GetWindowSize().x;
+        float windowHeight = ImGui::GetWindowSize().y;
+        
+        // Recording duration display
+        std::string durationText = "Duration: " + formatDuration(recordingDuration);
+        float textWidth = ImGui::CalcTextSize(durationText.c_str()).x;
+        ImGui::SetCursorPosX((windowWidth - textWidth) * 0.5f);
+        ImGui::SetCursorPosY(windowHeight * 0.3f);
+        ImGui::Text("%s", durationText.c_str());
+
+        // Record/Stop button
+        float buttonWidth = 120.0f;
+        float buttonHeight = 40.0f;
+        ImGui::SetCursorPosX((windowWidth - buttonWidth) * 0.5f);
+        ImGui::SetCursorPosY(windowHeight * 0.5f);
+
+        if (!isRecording) {
+            if (ImGui::Button("Record", ImVec2(buttonWidth, buttonHeight))) {
+                if (recorder.startRecording()) {
+                    isRecording = true;
+                    startTime = std::chrono::steady_clock::now();
+                    recordingDuration = 0.0f;
+                }
+            }
+        } else {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.8f, 0.2f, 0.2f, 1.0f));
+            if (ImGui::Button("Stop", ImVec2(buttonWidth, buttonHeight))) {
+                recorder.stopRecording();
+                isRecording = false;
+                recorder.saveToFile("recording.wav");
+            }
+            ImGui::PopStyleColor();
+        }
+
+        ImGui::End();
+
+        // Rendering
+        ImGui::Render();
+        int display_w, display_h;
+        glfwGetFramebufferSize(window, &display_w, &display_h);
+        glViewport(0, 0, display_w, display_h);
+        glClearColor(0.45f, 0.55f, 0.60f, 1.00f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
+        glfwSwapBuffers(window);
     }
 
-    std::cout << "Recording... Press Enter to stop.\n";
-    std::cin.get();
+    // Cleanup
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
 
-    recorder.stopRecording();
-    
-    std::cout << "Recording stopped. Saving to 'recording.wav'...\n";
-    if (recorder.saveToFile("recording.wav")) {
-        std::cout << "Recording saved successfully!\n";
-    } else {
-        std::cerr << "Error saving recording\n";
-        return 1;
-    }
+    glfwDestroyWindow(window);
+    glfwTerminate();
 
     return 0;
 }
